@@ -33,7 +33,7 @@ QML Integral
 
 * **Languages**: Python, Jupyter Notebook
 * **Libraries**:
-    * Qiskit: For building and simulating quantum circuits
+    * Pennylane: For building and simulating quantum circuits
     * PyTorch: For model training and optimization
     * NumPy: For numerical operations
     * Matplotlib: For data visualization
@@ -52,7 +52,7 @@ cd QML_Integral
 ### 2\. Install the necessary libraries
 
 ```bash
-pip install qiskit torch numpy matplotlib
+pip install pennylane torch numpy matplotlib
 ```
 
 -----
