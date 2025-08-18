@@ -11,7 +11,7 @@ Our findings offer valuable insights into optimizing QuInt-Nets for applications
 
 ## Key Features
 
-* **Quantum Circuit-Based Integration**: Designs quantum circuits using Qiskit to perform integral calculations.
+* **Quantum Circuit-Based Integration**: Designs quantum circuits using Pennylane to perform integral calculations.
 * **PyTorch Integration**: Uses PyTorch to optimize the parameters of the quantum circuit and train the model.
 * **Data Analysis and Visualization**: Analyzes experimental results using Jupyter Notebooks and visualizes them clearly with matplotlib.
 
