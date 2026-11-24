@@ -11,16 +11,20 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import argparse
 import os
+import copy
+import sys
+from functools import partial
+from pathlib import Path
 
 ####################################
+ANALYSIS_DIR = Path(__file__).resolve().parent / 'Analysis & Plot Making'
+ENVIRONMENTS = ['Ideal', 'GateError', 'BitFlip', 'Depolarizing', 'BitFlib_Layer', 'Depolarizing_Layer']
 torch_pi = torch.Tensor([np.pi])
  
-parser = argparse.ArgumentParser(description='Run Quantum Neural Network training.')
 
-device = "cpu"
+device = os.environ.get("QUINT_DEVICE", "cuda:0" if torch.cuda.is_available() else "cpu")
 
-print("Running Device :", device)
-print("--------------------------------------------")
+
 
 ### Pennylane Quantum Device ####################################
 dev_QNN = qml.device("default.qubit", wires = 2)
@@ -33,7 +37,7 @@ dev_DQC1_noise = qml.device("default.mixed", wires = 3)
 
 ################################################################################################################################################
 ### Quantum Circuit ####################################
-@qml.qnode(dev_QNN, interface='torch')
+@qml.qnode(dev_QNN, interface='torch', diff_method='backprop')
 def QNN_circuit(layers, x, theta):
     i = 0
 
@@ -52,7 +56,7 @@ def QNN_circuit(layers, x, theta):
     return qml.expval((qml.PauliZ(0)+qml.PauliZ(1))/2)
 
 ### Quantum Circuit - BitFlip ####################################
-@qml.qnode(dev_QNN_noise, interface='torch')
+@qml.qnode(dev_QNN_noise, interface='torch', diff_method='backprop')
 def QNN_circuit_BitFlip(layers, x, phi):
     i = 0
 
@@ -75,7 +79,7 @@ def QNN_circuit_BitFlip(layers, x, phi):
 
 
 ### Quantum Circuit - Depoloarizing ####################################
-@qml.qnode(dev_QNN_noise, interface='torch')
+@qml.qnode(dev_QNN_noise, interface='torch', diff_method='backprop')
 def QNN_circuit_Depolarizing(layers, x, phi):
     i = 0
 
@@ -97,8 +101,50 @@ def QNN_circuit_Depolarizing(layers, x, phi):
     return qml.expval((qml.PauliZ(0)+qml.PauliZ(1))/2)
 
 ################################################################################################################################################
+@qml.transform
+def dense_batched_rz(tape):
+    # PennyLane 0.41 default.mixed reshapes a broadcast RZ diagonal as an
+    # unbatched vector. The identical full matrix uses its supported general
+    # unitary path; parameters, channel placement, and derivatives are unchanged.
+    operations = [
+        qml.QubitUnitary(op.matrix(), wires=op.wires) if op.name == 'RZ' and op.batch_size is not None else op
+        for op in tape.operations
+    ]
+    # Its batched probability marginalization also calls numpy on live tensors.
+    # The same observable as a full Hermitian matrix selects Tr(rho O) instead.
+    observable = qml.Hermitian(qml.matrix(tape.measurements[0].obs, wire_order=[0, 1]), wires=[0, 1])
+    measurements = [qml.expval(observable)]
+    return (qml.tape.QuantumScript(operations, measurements, shots=tape.shots),), lambda values: values[0]
+
+
+@dense_batched_rz
+@qml.qnode(dev_QNN_noise, interface='torch', diff_method='backprop')
+def QNN_circuit_Layer(layers, x, theta, channel):
+    for layer in range(layers):
+        for q in range(2):
+            i = 6 * layer + 3 * q
+            qml.RY(theta[i], wires=q)
+            qml.RZ(theta[i+1] * x, wires=q)
+            qml.RX(theta[i+2], wires=q)
+        qml.CZ(wires=[0, 1])
+        for q in range(2):
+            channel(0.001, wires=q)
+
+    qml.RY(theta[-1], wires=0)
+    qml.RY(theta[-2], wires=1)
+    return qml.expval((qml.PauliZ(0) + qml.PauliZ(1))/2)
+
+
+QNN_CHANNELS = {
+    'BitFlip': dense_batched_rz(QNN_circuit_BitFlip),
+    'Depolarizing': dense_batched_rz(QNN_circuit_Depolarizing),
+    'BitFlib_Layer': partial(QNN_circuit_Layer, channel=qml.BitFlip),
+    'Depolarizing_Layer': partial(QNN_circuit_Layer, channel=qml.DepolarizingChannel),
+}
+
+
 ### QSP Circuit ####################################
-@qml.qnode(dev_QSP, interface = 'torch')
+@qml.qnode(dev_QSP, interface = 'torch', diff_method='backprop')
 def QSP_circuit(layers, x, phi):
     theta = -2 * torch.arccos(x)
     
@@ -123,7 +169,7 @@ def QSP_circuit(layers, x, phi):
     return qml.expval((qml.PauliZ(0)+qml.PauliZ(2))/2)
 
 ### QSP Circuit - BitFlip ####################################
-@qml.qnode(dev_QSP_noise, interface = 'torch')
+@qml.qnode(dev_QSP_noise, interface = 'torch', diff_method='backprop')
 def QSP_circuit_BitFlip(layers, x, phi):
     theta = -2 * torch.arccos(x)
     
@@ -151,7 +197,7 @@ def QSP_circuit_BitFlip(layers, x, phi):
     return qml.expval((qml.PauliZ(0)+qml.PauliZ(2))/2)
 
 ### QSP Circuit - Depolarizing ####################################
-@qml.qnode(dev_QSP_noise, interface = 'torch')
+@qml.qnode(dev_QSP_noise, interface = 'torch', diff_method='backprop')
 def QSP_circuit_Depolarizing(layers, x, phi):
     theta = -2 * torch.arccos(x)
     
@@ -203,7 +249,7 @@ def DQC1_Unit(layers, x, thetas, phis, wires):
     W(phis[i], wires)
 
 ### DQC1 Circuit ####################################
-@qml.qnode(dev_DQC1, interface = 'torch')
+@qml.qnode(dev_DQC1, interface = 'torch', diff_method='backprop')
 def DQC1_circuit(layers, x, thetas, phis):
     qml.Hadamard(0)
 
@@ -213,7 +259,7 @@ def DQC1_circuit(layers, x, thetas, phis):
 
 
 ### DQC1 Circuit - Bit Flip ####################################
-@qml.qnode(dev_DQC1_noise, interface = 'torch')
+@qml.qnode(dev_DQC1_noise, interface = 'torch', diff_method='backprop')
 def DQC1_circuit_BitFlip(layers, x, thetas, phis):
     qml.Hadamard(0)
 
@@ -224,7 +270,7 @@ def DQC1_circuit_BitFlip(layers, x, thetas, phis):
     return qml.expval(qml.PauliX(wires = 0))
 
 ### DQC1 Circuit - Depolarizing ####################################
-@qml.qnode(dev_DQC1_noise, interface = 'torch')
+@qml.qnode(dev_DQC1_noise, interface = 'torch', diff_method='backprop')
 def DQC1_circuit_Depolarizing(layers, x, thetas, phis):
     qml.Hadamard(0)
 
@@ -262,47 +308,25 @@ class QNN_Model_GateError(nn.Module):
         self.num_layers = layers
 
     def forward(self, data_point):
-        noise = torch.randn(len(self.theta))
+        noise = torch.randn_like(self.theta)
         noise_theta = self.theta + 0.001 * noise
         output = QNN_circuit(self.num_layers, data_point, noise_theta)
         return output
 
 ### VQC 모델(QNN - BitFlip) ####################################
-class QNN_Model_BitFlip(nn.Module):
-    def __init__(self, layers):
-        super().__init__()
-        self.theta = torch_pi * torch.rand(6 * layers + 2, requires_grad=True)
-        self.theta = nn.Parameter(self.theta)
-    
-        self.num_training_paramters = 6 * layers + 2
-        self.num_qubits = 2
-        self.num_layers = layers
+class QNN_Model_Channel(QNN_Model):
+    def __init__(self, layers, env):
+        super().__init__(layers)
+        self.env = env
 
     def forward(self, data_point):
-        outputs = torch.zeros_like(data_point)
-        for i, x in enumerate(data_point):
-            outputs[i] = QNN_circuit_BitFlip(self.num_layers, x, self.theta)
-        return outputs
-    
+        return QNN_CHANNELS[self.env](self.num_layers, data_point, self.theta)
 
-### VQC 모델(QNN - Depolarizing) ####################################
-class QNN_Model_Depolarizing(nn.Module):
-    def __init__(self, layers):
-        super().__init__()
-        self.theta = torch_pi * torch.rand(6 * layers + 2, requires_grad=True)
-        self.theta = nn.Parameter(self.theta)
-    
-        self.num_training_paramters = 6 * layers + 2
-        self.num_qubits = 2
-        self.num_layers = layers
 
-    def forward(self, data_point):
-        outputs = torch.zeros_like(data_point)
-        for i, x in enumerate(data_point):
-            outputs[i] = QNN_circuit_Depolarizing(self.num_layers, x, self.theta)
-        return outputs
+# Existing constructors used by earlier notebooks.
+QNN_Model_BitFlip = partial(QNN_Model_Channel, env='BitFlip')
+QNN_Model_Depolarizing = partial(QNN_Model_Channel, env='Depolarizing')
 
-################################################################################################################################################
 ### VQC 모델(QSP - Ideal)  ####################################
 class QSP_Model(nn.Module):
     def __init__(self, layers):
@@ -331,7 +355,7 @@ class QSP_Model_GateError(nn.Module):
         self.num_layers = layers
 
     def forward(self, data_point):
-        noise = torch.randn(len(self.theta))
+        noise = torch.randn_like(self.theta)
         noise_theta = self.theta + 0.001 * noise
         output = QSP_circuit(self.num_layers, data_point, noise_theta)
         return output
@@ -454,8 +478,7 @@ def load_model_environment(model, env, layers):
         "QNN": {
             "Ideal": QNN_Model,
             "GateError": QNN_Model_GateError,
-            "BitFlip": QNN_Model_BitFlip,
-            "Depolarizing": QNN_Model_Depolarizing,
+            **{name: partial(QNN_Model_Channel, env=name) for name in QNN_CHANNELS},
         },
         "QSP": {
             "Ideal": QSP_Model,
@@ -516,8 +539,11 @@ def Log_Cosh_loss(pred, target):
     loss = torch.mean(torch.log(torch.cosh(pred - target)))
     return loss
 
+# Denominator regularizer for targets normalized by max(abs(y)).
+CHISQR_EPSILON = 1e-10
+
 def Chisqr_loss(pred, target):
-    loss = torch.mean(((target - pred)**2) /torch.abs(target))
+    loss = torch.mean(((target - pred)**2) / (torch.abs(target) + CHISQR_EPSILON))
     return loss
 
 def KL_loss(pred, target):
@@ -552,7 +578,7 @@ def train(model, dataset, n_epochs, loss_type, optimizer, batch_size, device = d
     
     # --- 미분 연산 ---
     def derivative(y, t) : 
-        return torch.autograd.grad(y, t, create_graph=True, grad_outputs=torch.ones(y.size()).to(device))[0]
+        return torch.autograd.grad(y, t, create_graph=True, grad_outputs=torch.ones_like(y))[0]
     
     # --- Model device로 이동 ---
     model = model.to(device)
@@ -582,7 +608,8 @@ def train(model, dataset, n_epochs, loss_type, optimizer, batch_size, device = d
         epoch_train_loss = 0.0
         for xb, yb in train_loader:
 
-            xb = xb.requires_grad_()
+            xb = xb.to(device).requires_grad_()
+            yb = yb.to(device)
             Qx = model(xb)
             dQdx = derivative(Qx, xb)
             loss = loss_fn(dQdx, yb)
@@ -602,7 +629,8 @@ def train(model, dataset, n_epochs, loss_type, optimizer, batch_size, device = d
         for xb, yb in val_loader:
 
             # --- Validation 계산 ---
-            xb = xb.requires_grad_()
+            xb = xb.to(device).requires_grad_()
+            yb = yb.to(device)
             Qx = model(xb)
             dQdx = derivative(Qx, xb)
             loss = loss_fn(dQdx, yb)
@@ -617,7 +645,7 @@ def train(model, dataset, n_epochs, loss_type, optimizer, batch_size, device = d
         # --- Best Model 저장 ---
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_model_state = model.state_dict()
+            best_model_state = copy.deepcopy(model.state_dict())
 
         # --- Early Stopping ---
         if len(val_losses) > 5:
@@ -643,83 +671,104 @@ def train(model, dataset, n_epochs, loss_type, optimizer, batch_size, device = d
     return model, train_losses, val_losses
 
 
-### TODO : Settings ####################################
-# --- Circuit & Model Configuration ---
-parser.add_argument('--model_type', type=str, default='QNN', choices=['QNN', 'QSP', 'DQC1'], help='Model type')
-parser.add_argument('--env', type=str, default='Ideal', choices=['Ideal', 'GateError', 'BitFlip', 'Depolarizing'], help='Environment')
-parser.add_argument('--layers', type=int, default=10, help='Number of layers in the circuit')
-parser.add_argument('--test_func', type=str, default='BW', choices=['CPF', 'Step', 'BW'], help='Test function')
-parser.add_argument('--sample_type', type=str, default='Uni', choices=['Uni', 'Imp', 'HMC'], help='Sample type')
-parser.add_argument('--loss_type', type=str, default='MSE', choices=['MSE', 'Log_Cosh', 'Chisqr', 'MSE_KL'], help='Loss function')
-parser.add_argument('--num_epochs', type=int, default=int(1000), help = 'Number of Epochs')
-parser.add_argument('--lr', type =float, default=1e-3, help = 'Learning Rate')
-parser.add_argument('--batch_size', type=int, default = 128, help = 'Batch Size')
+def main():
+    parser = argparse.ArgumentParser(description="Train a QuInt-Net model.")
+    ### Settings ####################################
+    # --- Circuit & Model Configuration ---
+    parser.add_argument('--model_type', type=str, default='QNN', choices=['QNN', 'QSP', 'DQC1'], help='Model type')
+    parser.add_argument('--env', type=str, default='Ideal', choices=ENVIRONMENTS, help='Environment')
+    parser.add_argument('--layers', type=int, default=10, help='Number of layers in the circuit')
+    parser.add_argument('--test_func', type=str, default='BW', choices=['CPF', 'Step', 'BW'], help='Test function')
+    parser.add_argument('--sample_type', type=str, default='Uni', choices=['Uni', 'GS', 'HMC'], help='Sample type')
+    parser.add_argument('--loss_type', type=str, default='MSE', choices=['MSE', 'Log_Cosh', 'Chisqr', 'MSE_KL'], help='Loss function')
+    parser.add_argument('--num_epochs', type=int, default=1000, help = 'Number of Epochs')
+    parser.add_argument('--lr', type =float, default=1e-3, help = 'Learning Rate')
+    parser.add_argument('--batch_size', type=int, default = 128, help = 'Batch Size')
 
-args = parser.parse_args()
+    parser.add_argument('--device', default=device)
+    parser.add_argument('--results_dir', type=Path, default=Path(__file__).resolve().parent / 'Results', help='Seeded benchmark output directory')
+    parser.add_argument('--seeds', nargs='+', type=int, help='Train and evaluate independent benchmark seeds')
+    args = parser.parse_args()
+    if args.env.endswith('_Layer') and args.model_type != 'QNN':
+        parser.error('Layerwise noise is defined for QNN.')
 
-# Use args in place of hardcoded values
-model_type = args.model_type
-env = args.env
-layers = args.layers
-test_func = args.test_func
-sample_type = args.sample_type
-loss_type = args.loss_type
-n_epochs = args.num_epochs
-lr = args.lr
-batch_size = args.batch_size
+    if args.num_epochs < 1 or args.layers < 1 or args.batch_size < 2:
+        parser.error('Require positive epochs and layers, and batch_size >= 2.')
+    if args.seeds is not None:
+        if len(set(args.seeds)) != len(args.seeds):
+            parser.error('Each seed must be unique.')
+        if args.env != 'Ideal' and (args.model_type != 'QNN' or args.test_func != 'BW'):
+            parser.error('The seeded noise benchmark uses QNN on BW.')
+        sys.path.insert(0, str(ANALYSIS_DIR))
+        from benchmark_training import train_group
+        train_group(args)
+        return
+
+    model_type = args.model_type
+    env = args.env
+    layers = args.layers
+    test_func = args.test_func
+    sample_type = args.sample_type
+    loss_type = args.loss_type
+    n_epochs = args.num_epochs
+    lr = args.lr
+    batch_size = args.batch_size
 
 
-### Data Prepertaion ####################################
-file_path = f'Data File/{test_func}_Data({sample_type}, 5000).npz'
-dataset, X_norm, y_norm = Making_Dataset(file_path)
+    ### Data preparation ####################################
+    file_path = Path(__file__).resolve().parent / 'Data File' / f'{test_func}_Data({sample_type}, 5000).npz'
+    dataset, X_norm, y_norm = Making_Dataset(file_path)
 
-### Load model based on environment #####################
-vqc_model = load_model_environment(model_type, env, layers)
+    ### Load model based on environment #####################
+    vqc_model = load_model_environment(model_type, env, layers).to(args.device)
 
-### Optimizer ####################################
-optimizer = optim.Adam(vqc_model.parameters(), lr=lr)
+    ### Optimizer ####################################
+    optimizer = optim.Adam(vqc_model.parameters(), lr=lr)
+
+    optimized_model, train_losses, val_losses = train(vqc_model, dataset, n_epochs, loss_type, optimizer, batch_size, args.device)
+
+    #### Results ################################
+    val_str = f"{val_losses[-1]:.3e}".replace('.', '_').replace('e-', '_e')
+    model_path = f"./Model/{model_type}/{env}/{test_func}/{sample_type}/{loss_type}/{lr}/{model_type}_{env}_L{layers}_N{n_epochs}_{val_str}.pt"
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    print("--------------------------------------------")
+    print("Model Path :", model_path)
+    print("--------------------------------------------")
+
+    save_dir = f"./Model/{model_type}/{env}/{test_func}/{sample_type}/{loss_type}/{lr}"
+    os.makedirs(save_dir, exist_ok=True)
+
+    ### Training Result Plot #######################
+    plt.figure(figsize=(5,4))
+    plt.plot(train_losses, label='Train Loss')
+    plt.plot(val_losses, label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.yscale('log')
+    plt.legend()
+    plt.title('Training & Validation Loss over Epochs')
+    plt.savefig(f"{save_dir}/{model_type}_{env}_loss_curve_{val_str}.png", dpi=300)  # 저장
+    # plt.show()
+
+    def derivative(y, t) : 
+        return torch.autograd.grad(y, t, create_graph=True, grad_outputs=torch.ones_like(y))[0]
+
+    optimized_model = optimized_model.cpu()
+    optimized_model.eval()
+    X_norm = X_norm.requires_grad_()
+    Qx = optimized_model(X_norm)
+    dQdx = derivative(Qx, X_norm)
+
+    plt.figure(figsize=(5,4))
+    plt.scatter(X_norm.detach().numpy(), dQdx.detach().numpy(), s=1, label='Model derivative')
+    plt.scatter(X_norm.detach().numpy(), y_norm.detach().numpy(), s=1, label='Target function')
+    plt.legend()
+    # plt.title('Model Derivative vs Target')
+    plt.savefig(f"{save_dir}/{model_type}_{env}_derivative_{val_str}.png", dpi=300)  # 저장
+    # plt.show()
+
+    torch.save(optimized_model.state_dict(), model_path)
+    np.savez(f'{save_dir}/Training_Graph_{val_str}.npz', train_graph = train_losses, val_graph = val_losses)
 
 if __name__ == "__main__":
-    optimized_model, train_losses, val_losses = train(vqc_model, dataset, n_epochs, loss_type, optimizer, batch_size)
-
-#### Results ################################
-val_str = f"{val_losses[-1]:.3e}".replace('.', '_').replace('e-', '_e')
-model_path = f"./Model/{model_type}/{env}/{test_func}/{sample_type}/{loss_type}/{lr}/{model_type}_{env}_L{layers}_N{n_epochs}_{val_str}.pt"
-os.makedirs(os.path.dirname(model_path), exist_ok=True)
-print("--------------------------------------------")
-print("Model Path :", model_path)
-print("--------------------------------------------")
-
-save_dir = f"./Model/{model_type}/{env}/{test_func}/{sample_type}/{loss_type}/{lr}"
-os.makedirs(save_dir, exist_ok=True)
-
-### Training Result Plot #######################
-plt.figure(figsize=(5,4))
-plt.plot(train_losses, label='Train Loss')
-plt.plot(val_losses, label='Validation Loss')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.yscale('log')
-plt.legend()
-plt.title('Training & Validation Loss over Epochs')
-plt.savefig(f"{save_dir}/{model_type}_{env}_loss_curve_{val_str}.png", dpi=300)  # 저장
-# plt.show()
-
-def derivative(y, t) : 
-    return torch.autograd.grad(y, t, create_graph=True, grad_outputs=torch.ones(y.size()))[0]
-
-optimized_model.eval()
-X_norm = X_norm.requires_grad_()
-Qx = optimized_model(X_norm)
-dQdx = derivative(Qx, X_norm)
-
-plt.figure(figsize=(5,4))
-plt.scatter(X_norm.detach().numpy(), dQdx.detach().numpy(), s=1, label='Model derivative')
-plt.scatter(X_norm.detach().numpy(), y_norm.detach().numpy(), s=1, label='Target function')
-plt.legend()
-# plt.title('Model Derivative vs Target')
-plt.savefig(f"{save_dir}/{model_type}_{env}_derivative_{val_str}.png", dpi=300)  # 저장
-# plt.show()
-
-torch.save(optimized_model.state_dict(), model_path)
-np.savez(f'{save_dir}/Training_Graph_{val_str}.npz', train_graph = train_losses, val_graph = val_losses)
+    main()

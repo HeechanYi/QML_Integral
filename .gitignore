@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv*/
+/Model/
+/Results/
+/Analysis & Plot Making/Classic_Code/Results/
+*.pt

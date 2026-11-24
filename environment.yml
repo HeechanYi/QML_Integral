@@ -1,0 +1,18 @@
+name: QuInt_Net
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - pennylane==0.41.1
+      - pennylane-lightning==0.41.1
+      - autoray==0.7.0
+      - torch==2.2.2
+      - numpy==1.26.4
+      - scipy==1.15.2
+      - matplotlib==3.10.3
+      - tqdm==4.67.1
+      - notebook
+      - jupyterlab
+      - ipykernel
