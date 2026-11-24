@@ -1,6 +1,8 @@
-# Variational Quantum Integration for High Energy Physics
+# QuInt-Net : Learning Functions with Sharp Features Using Quantum Neural Networks
 
 ## Overview
+
+[![QuInt-Net workflow](./Figure/Schematics.png)](./Figure/Schematics.pdf)
 
 Traditional Monte Carlo methods and numerical integration often struggle with slow convergence when evaluating integrals involving functions with singular features, such as rapidly varying regions or narrow peaks.
 In this study, we present the impact of sampling strategies and loss functions on integration efficiency in the Quantum Integration Network (QuInt-Net).
