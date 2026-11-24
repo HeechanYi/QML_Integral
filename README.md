@@ -29,6 +29,8 @@ The three one-dimensional benchmarks are a complex periodic function (CPF), a st
 QML_Integral
 ├── Analysis & Plot Making/        # Analysis notebook, benchmark helpers and classical baselines
 │   ├── Analysis.ipynb             # Comparison of the published seed results
+│   ├── analyze_gs.py             # GS coordinate counts and validation overlap
+│   ├── analyze_hmc.py            # Independent HMC chain diagnostics
 │   ├── benchmark_training.py      # Seeded training and checkpoint evaluation
 │   ├── qnn_results.py             # Physical normalization and integral errors
 │   └── Classic_Code/              # Plain MC and MLP baselines
@@ -156,7 +158,7 @@ python Running_QuInt.py --model_type QNN --env Depolarizing_Layer --test_func BW
 | `Ideal` | Unitary circuit |
 | `GateError` | Gaussian parameter perturbation with standard deviation 0.001 |
 | `BitFlip`, `Depolarizing` | Independent channels on both wires after the final rotations |
-| `BitFlib_Layer`, `Depolarizing_Layer` | Independent channels on both wires immediately after the CZ in each re-uploading layer |
+| `BitFlip_Layer`, `Depolarizing_Layer` | Independent channels on both wires immediately after the CZ in each re-uploading layer |
 
 All four Pauli-channel environments use probability 0.001 per wire. Training and evaluation use the same channel placement. The two layerwise environments apply to QNN only.
 
@@ -173,6 +175,17 @@ Single runs save weights, training histories and plots under `Model/`. To contin
 ```bash
 python Additional_Running.py --model_type QNN --test_func BW --model <saved_weights>.pt
 ```
+
+### Appendix Sampling Diagnostics
+
+From the repository root, run the GS analysis on the fixed datasets and the HMC diagnostics on ten independent chains per benchmark.
+
+```bash
+python "Analysis & Plot Making/analyze_gs.py"
+python "Analysis & Plot Making/analyze_hmc.py"
+```
+
+Both scripts print summary statistics and save plots in `Figure/`. The HMC summary includes acceptance rates, lag-one autocorrelation and median effective sample size for the chain position.
 
 ### Classical Baselines
 
