@@ -18,7 +18,7 @@ from pathlib import Path
 
 ####################################
 ANALYSIS_DIR = Path(__file__).resolve().parent / 'Analysis & Plot Making'
-ENVIRONMENTS = ['Ideal', 'GateError', 'BitFlip', 'Depolarizing', 'BitFlib_Layer', 'Depolarizing_Layer']
+ENVIRONMENTS = ['Ideal', 'GateError', 'BitFlip', 'Depolarizing', 'BitFlip_Layer', 'Depolarizing_Layer']
 torch_pi = torch.Tensor([np.pi])
  
 
@@ -138,7 +138,7 @@ def QNN_circuit_Layer(layers, x, theta, channel):
 QNN_CHANNELS = {
     'BitFlip': dense_batched_rz(QNN_circuit_BitFlip),
     'Depolarizing': dense_batched_rz(QNN_circuit_Depolarizing),
-    'BitFlib_Layer': partial(QNN_circuit_Layer, channel=qml.BitFlip),
+    'BitFlip_Layer': partial(QNN_circuit_Layer, channel=qml.BitFlip),
     'Depolarizing_Layer': partial(QNN_circuit_Layer, channel=qml.DepolarizingChannel),
 }
 

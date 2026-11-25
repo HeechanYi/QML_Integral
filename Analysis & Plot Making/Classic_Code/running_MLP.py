@@ -1,4 +1,4 @@
-"""Train a 62-parameter BW antiderivative using the original PyTorch workflow."""
+"""Train a 62-parameter one-dimensional antiderivative using the original PyTorch workflow."""
 
 import argparse
 import copy
@@ -12,9 +12,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split, TensorDataset
 
-from classic_utils import (CLASSIC_DIR, Data_loader, Data_Normalization, data_file,
-                           file_hash, Reference_Results, Evaluate_Antiderivative,
-                           Save_Results, M_Z, GAMMA)
+from classic_utils import (CLASSIC_DIR, DATA_DIR, Data_loader, Data_Normalization, file_hash,
+                           Evaluate_Antiderivative, Save_Results, M_Z, GAMMA)
+from running_MC import Benchmark_Reference, Benchmark_Settings
 
 
 ### Model ####################################
@@ -43,7 +43,7 @@ def Log_Cosh_loss(pred, target):
 
 
 def Chisqr_loss(pred, target):
-    return torch.mean((target - pred)**2 / torch.abs(target))
+    return torch.mean((target - pred)**2 / torch.abs(target).clamp_min(1e-10))
 
 
 def MSE_KL_loss(pred, target):
@@ -124,7 +124,7 @@ def train(model, dataset, n_epochs, loss_type, optimizer, batch_size, seed):
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Train the BW MLP baseline (62 parameters).")
+    parser = argparse.ArgumentParser(description="Train the one-dimensional MLP baseline (62 parameters).")
     parser.add_argument('--sample_type', default='Uni', choices=['Uni', 'GS', 'HMC'])
     parser.add_argument('--loss_type', default='MSE', choices=['MSE', 'Log_Cosh', 'Chisqr', 'MSE_KL'])
     parser.add_argument('--num_epochs', type=int, default=1000)
@@ -134,6 +134,7 @@ def parse_args(argv=None):
     parser.add_argument('--dtype', default='float32', choices=['float32', 'float64'])
     parser.add_argument('--data_file', type=Path)
     parser.add_argument('--output_dir', type=Path)
+    parser.add_argument('--test_func', type=str.upper, choices=['CPF', 'STEP', 'BW'])
     args = parser.parse_args(argv)
     if args.num_epochs < 1 or args.batch_size < 2 or args.lr <= 0 or args.seed < 0:
         parser.error("Use positive epochs/lr, batch_size >= 2, and seed >= 0.")
@@ -146,21 +147,36 @@ def run(args):
     torch.set_num_threads(1)
     dtype = getattr(torch, args.dtype)
     sample_type = args.sample_type
-    source = (args.data_file or data_file(sample_type)).resolve()
-    output_dir = (args.output_dir or CLASSIC_DIR / 'Results' / 'MLP' / 'BW'
+    benchmark = args.test_func
+    if args.data_file is None:
+        benchmark = benchmark or 'BW'
+        prefix = 'Step' if benchmark == 'STEP' else benchmark
+        source = DATA_DIR / f'{prefix}_Data({sample_type}, 5000).npz'
+    else:
+        source = args.data_file.resolve()
+        prefix = source.stem.split('_Data(')[0].upper()
+        if benchmark is None and prefix in ('CPF', 'STEP', 'BW'):
+            benchmark = prefix
+    name = benchmark or source.stem
+    units = 'GeV^-3' if benchmark == 'BW' else ''
+    X, y, lower, upper = Data_loader(source)
+    if benchmark:
+        fn, _, _, _, _, _ = Benchmark_Settings(benchmark)
+        np.testing.assert_allclose(y, fn(X), rtol=1e-6, atol=1e-12)
+        reference = Benchmark_Reference(benchmark, lower, upper)
+    output_dir = (args.output_dir or CLASSIC_DIR / 'Results' / 'MLP' / name
                   / sample_type / args.loss_type / str(args.lr) / f'seed_{args.seed}').resolve()
     if output_dir.exists():
         raise FileExistsError(f"Results already exist: {output_dir}; choose a new --output_dir.")
 
-    X, y, lower, upper = Data_loader(source)
     X_norm, y_norm = Data_Normalization(X, y, lower, upper)
-    amplitude = float(np.max(np.abs(y)))
+    amplitude = float(np.max(np.abs(y))) or 1.0
     dataset = TensorDataset(torch.tensor(X_norm, dtype=dtype),
                             torch.tensor(y_norm, dtype=dtype))
     model = MLP_Model().to(dtype=dtype)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     print('Running Device : cpu')
-    print(f'BW | {sample_type} | {args.loss_type} | '
+    print(f'{name} | {sample_type} | {args.loss_type} | '
           f'{len(dataset)} data points | {model.num_training_parameters} parameters')
 
     start = time.perf_counter()
@@ -168,31 +184,41 @@ def run(args):
         model, dataset, args.num_epochs, args.loss_type, optimizer, args.batch_size, args.seed)
     training_seconds = time.perf_counter() - start
     start = time.perf_counter()
-    reference = Reference_Results(lower, upper)
-    reference_seconds = time.perf_counter() - start
-    start = time.perf_counter()
-    prediction, estimation = Evaluate_Antiderivative(model, amplitude, lower, upper, reference)
+    if benchmark:
+        prediction, estimation = Evaluate_Antiderivative(model, amplitude, lower, upper, reference)
+    else:
+        # The NPZ supplies point labels but no reference integrals.
+        edges = np.linspace(lower, upper, 31)
+        x_edges = torch.tensor((2*edges - upper - lower)/(upper - lower), dtype=dtype)
+        with torch.no_grad():
+            output = model(x_edges).cpu().numpy().astype(float)
+        bins = amplitude * (upper - lower)/2 * np.diff(output)
+        prediction = dict(slin=edges[:-1], bin_end=edges[1:], prediction=bins,
+                          cum_idx=edges[1:], cum_pred=np.cumsum(bins))
+        estimation = dict(best_val_loss=info['best_val_loss'])
     inference_seconds = time.perf_counter() - start
 
-    metadata = dict(method='MLP', test_func='BW', sample_type=sample_type,
+    metadata = dict(method='MLP', test_func=name, sample_type=sample_type,
                     loss_type=args.loss_type, seed=args.seed, dtype=args.dtype,
                     data_file=str(source), data_sha256=file_hash(source),
                     n_data=len(dataset), **info, amplitude=amplitude,
-                    lower=lower, upper=upper, M_Z=M_Z, Gamma=GAMMA,
+                    lower=lower, upper=upper, 
                     x_mid=(lower + upper) / 2, s_scale=(upper - lower) / 2,
                     hidden_widths=[9, 4], activation='tanh', output_bias=False,
                     num_training_parameters=model.num_training_parameters,
                     matched_qnn_layers=10, lr=args.lr, batch_size=args.batch_size,
                     optimizer='Adam', training_seconds=training_seconds,
-                    inference_seconds=inference_seconds, reference_seconds=reference_seconds,
-                    cumulative_normalization='none', integral_units='GeV^-3',
-                    data_generation_cost='archived dataset; not timed',
-                    source_validation_evaluations=len(X),
-                    split_note='Original QNN split indices were not saved; this split is reproducible, not a recovered historical split.',
+                    inference_seconds=inference_seconds, 
+                    cumulative_normalization='none', integral_units=units,
+                    data_generation='fixed file',
+                    
+                    split_note='80:20 random split with the training seed',
                     initialization='PyTorch Linear defaults; torch.manual_seed(seed)',
                     torch_version=str(torch.__version__), numpy_version=np.__version__)
+    if benchmark == 'BW':
+        metadata.update(M_Z=M_Z, Gamma=GAMMA)
     Save_Results(output_dir, prediction, estimation, metadata)
-    torch.save(model.state_dict(), output_dir / 'MLP_BW.pt')
+    torch.save(model.state_dict(), output_dir / f'MLP_{name}.pt')
     np.savez(output_dir / 'Training_Graph.npz', train_graph=train_losses,
              val_graph=val_losses, **indices)
 
@@ -209,7 +235,8 @@ def run(args):
     fig.savefig(output_dir / 'Training_Loss.png', dpi=200)
     plt.close(fig)
     print(f"Saved best epoch {info['best_epoch']} to {output_dir}")
-    print(f"30-bin integral MAE: {float(estimation['int_mae']):.6e} GeV^-3")
+    if benchmark:
+        print(f"30-bin integral MAE: {float(estimation['int_mae']):.6e} {units}")
     return output_dir
 
 

@@ -21,7 +21,7 @@ The three one-dimensional benchmarks are a complex periodic function (CPF), a st
 * **PyTorch Integration**: Uses PyTorch to optimize the parameters of the quantum circuit and train the model on CPU or GPU.
 * **Noise Studies**: Trains and evaluates QNN under gate-parameter errors and under terminal or layerwise bit-flip and depolarizing channels.
 * **Seeded Benchmarks**: Repeats training over independent seeds with resumable checkpoints and per-seed error metrics.
-* **Classical Baselines**: Provides plain Monte Carlo and MLP baselines for the BW benchmark.
+* **Classical Baselines**: Compares direct Monte Carlo integration with a 62-parameter MLP trained on sampled function values.
 * **Data Analysis and Visualization**: Analyzes experimental results using Jupyter Notebooks and visualizes them clearly with matplotlib.
 
 ***
@@ -191,11 +191,13 @@ Both scripts print summary statistics and save plots in `Figure/`. The HMC summa
 
 ### Classical Baselines
 
-The classical BW baselines can be run separately.
+The MLP reads fixed NPZ data (`x_data`, `y_data`, `x_init`, `x_final`) with `--data_file`, or selects a benchmark file with `--test_func` and `--sample_type`. Plain MC selects the integrand with `--function CPF|STEP|BW` and reuses each uniform sample across all integration intervals.
+
+In the revision workspace, run these examples from `Rev_Round2/comment4/Classic_Code/`, which contains the matching `classic_utils.py`. The helper currently in this repository still uses the BW-specific data loader and reference-integral interface.
 
 ```bash
-python "Analysis & Plot Making/Classic_Code/running_MC.py" --help
-python "Analysis & Plot Making/Classic_Code/running_MLP.py" --help
+python running_MLP.py --data_file my_data.npz --loss_type MSE
+python running_MC.py --function STEP --n_samples 5000 --n_trials 10
 ```
 
 ***
@@ -213,7 +215,7 @@ The following CSV files are in [Data File/Benchmark Results](./Data%20File/Bench
 | Analysis | Files | Contents |
 | --- | --- | --- |
 | Table IV, layerwise noise | `qnn_layer_noise_per_seed.csv`, `qnn_layer_noise_intervals.csv`, `qnn_layer_noise_interval_summary.csv` | 240 BW training runs, four intervals per run. The archived channel labels `BitFlip` and `Depolarizing` in these files refer to channels after each layer's CZ. For Table IV, select `M +/- 10 Gamma`. The SD is across ten training seeds. Multiply `mean_absolute_relative_error` by 100 for the table percentage. |
-| Table IV, Gaussian parameter perturbations | `qnn_gaussian_draws.csv`, `qnn_gaussian_summary.csv` | 1,000 integral estimates per fixed V6 checkpoint for the ten-width window. Each draw perturbs the two endpoint evaluations independently. The SD uses the 1,000 draws (ddof = 0). The percentage is the absolute relative error of their mean. |
+| Table IV, Gaussian parameter perturbations | `qnn_gaussian_draws.csv`, `qnn_gaussian_summary.csv` | 1,000 integral estimates per archived checkpoints from the original submission for the ten-width window. Each draw perturbs the two endpoint evaluations independently. The SD uses the 1,000 draws (ddof = 0). The percentage is the absolute relative error of their mean. |
 | GS | `gs_summary.csv` | Distinct coordinates, repeat frequency, maximum multiplicity and training–validation overlap in the archived splits. |
 | HMC | `hmc_per_chain.csv`, `hmc_summary.csv`, `hmc_archived_halves.csv` | Diagnostics for ten independently generated chains per benchmark. The archived-halves file describes the two stored blocks of each fixed dataset separately. |
 | Classical BW comparison | `bw_comparison.csv`, `bw_comparison_per_seed_intervals.csv`, `bw_evaluation_budgets.csv`, `bw_reference_check.csv` | Budget counts, quadrature checks and aggregate errors. Per-seed interval estimates cover the ideal QNN, MLP and 5,000-evaluation MC runs used for the comparison figure. The 100,000-evaluation MC comparison is included in the aggregate file. |
