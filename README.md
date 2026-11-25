@@ -208,7 +208,7 @@ Open `Analysis & Plot Making/Analysis.ipynb` to compare the published seed resul
 
 The nine fixed NPZ datasets in `Data File/` (CPF, Step and BW, each with `Uni`, `GS` and `HMC` samples) contain coordinates, function values and domain endpoints. The original HMC chain settings for the archived CPF and Step datasets remain unconfirmed.
 
-### Data for the revised manuscript
+### Data
 
 The following CSV files are in [Data File/Benchmark Results](./Data%20File/Benchmark%20Results/). Each training configuration uses ten seeds (0–9) on a fixed dataset. BW integral estimates, integral errors and their standard deviations are in GeV⁻³; multiply BW integral estimates by 10⁵ to obtain the numbers in Table IV. CPF and Step values are dimensionless. Relative errors stored as fractions (`relative_error*`, `mean_absolute_relative_error`) must be multiplied by 100 for the percentages in the manuscript. Columns ending in `_pct` are already in percent.
 
