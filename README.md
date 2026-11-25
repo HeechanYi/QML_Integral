@@ -206,6 +206,20 @@ Open `Analysis & Plot Making/Analysis.ipynb` to compare the published seed resul
 
 The nine fixed NPZ datasets in `Data File/` (CPF, Step and BW, each with `Uni`, `GS` and `HMC` samples) contain coordinates, function values and domain endpoints. The original HMC chain settings for the archived CPF and Step datasets remain unconfirmed.
 
+### Data for the revised manuscript
+
+The following CSV files are in [Data File/Benchmark Results](./Data%20File/Benchmark%20Results/). BW integral estimates and their standard deviations are in GeV⁻³. Multiply them by 10⁵ to obtain the numbers in Table IV.
+
+| Analysis | Files | Contents |
+| --- | --- | --- |
+| Table IV, layerwise noise | `qnn_layer_noise_per_seed.csv`, `qnn_layer_noise_intervals.csv`, `qnn_layer_noise_interval_summary.csv` | 240 BW training runs, four intervals per run. The archived channel labels `BitFlip` and `Depolarizing` in these files refer to channels after each layer's CZ. For Table IV, select `M +/- 10 Gamma`. The SD is across ten training seeds. Multiply `mean_absolute_relative_error` by 100 for the table percentage. |
+| Table IV, Gaussian parameter perturbations | `qnn_gaussian_draws.csv`, `qnn_gaussian_summary.csv` | 1,000 integral estimates per fixed V6 checkpoint for the ten-width window. Each draw perturbs the two endpoint evaluations independently. The SD uses the 1,000 draws (ddof = 0). The percentage is the absolute relative error of their mean. |
+| GS | `gs_summary.csv` | Distinct coordinates, repeat frequency, maximum multiplicity and training–validation overlap in the archived splits. |
+| HMC | `hmc_per_chain.csv`, `hmc_summary.csv`, `hmc_archived_halves.csv` | Diagnostics for ten independently generated chains per benchmark. The archived-halves file describes the two stored blocks of each fixed dataset separately. |
+| Classical BW comparison | `bw_comparison.csv`, `bw_comparison_per_seed_intervals.csv`, `bw_evaluation_budgets.csv`, `bw_reference_check.csv` | Budget counts, quadrature checks and aggregate errors. Per-seed interval estimates cover the ideal QNN, MLP and 5,000-evaluation MC runs used for the comparison figure. The 100,000-evaluation MC comparison is included in the aggregate file. |
+
+The revised figures show the [fixed training datasets](./Figure/Sampling_fixed.pdf), [GS validation overlap](./Figure/GS_validation_overlap.pdf), [HMC diagnostics](./Figure/HMC_diagnostics.pdf) and [BW comparison](./Figure/BW_budget_comparison.pdf).
+
 * Integral MAE is the mean absolute integral error over 30 equal subintervals. BW integral errors are in GeV⁻³. CPF and Step integral errors are dimensionless.
 * Seed variation measures training variability on a fixed dataset.
 * GS weights depend on secant slopes between successive candidates in their stored order.

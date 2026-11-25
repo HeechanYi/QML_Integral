@@ -1,0 +1,4 @@
+method,sampler_calls,final_labels,total
+Uni,0,5000,5000
+GS,100000,5000,105000
+HMC,110000,5000,115000
